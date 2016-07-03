@@ -1,1 +1,2158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:mx="library://ns.adobe.com/flex/mx"
+			   xmlns:components="com.thcchat.components.*"
+			   width="1000" height="600" minWidth="1000" minHeight="600" backgroundColor="#000000"
+			   creationComplete="init()" preinitialize="preInit()" preloader="PreloaderBar"
+			   preloaderChromeColor="#39628c"
+			   chromeColor="#39628C"
+			   >
+	
+	<fx:Metadata>
+		[Event(name="chatUserJoin", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="chatUserLeave", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="chatUserQuit", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="chatUserClick", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="chatUserCamClick", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="chatUserWhois", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="sendPm", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="openPm", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="camdowDock", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="giveCookie", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="noticeUser", type="com.thcchat.events.ChatUserEvent")]
+		[Event(name="loginAttempt", type="com.thcchat.events.LoginEvent")]
+		[Event(name="userRegister", type="com.thcchat.events.RegistrationEvent")]
+	</fx:Metadata>
+	
+	<fx:Style>
+		@namespace s "library://ns.adobe.com/flex/spark";
+		@namespace mx "library://ns.adobe.com/flex/mx";
+		@namespace components "com.thcchat.components.*";
+		@namespace spark "flex.utils.spark.*";
+		@namespace resize "flex.utils.spark.resize.*";
+		
+		.avsettings {
+			borderWeight:2px;
+			borderColor: #7A7A7A;
+			cornerRadius:3px;
+			dropShadowVisible:true;
+			backgroundColor:#54874f;
+		}
+		global
+		{
+			content-background-alpha: 1.0;
+		}
+	</fx:Style>
+	
+	<fx:Declarations>
+		<s:DateTimeFormatter id="lastLoginFormatter" dateStyle="short" timeStyle="short"/>
+	</fx:Declarations>
+	
+	<s:states>
+		<s:State name="main"/>
+		<s:State name="login"/>
+	</s:states>
+	
+	<fx:Script>
+		<![CDATA[
+			import com.thcchat.components.CamSpotOptionPopup;
+			import com.thcchat.events.RegistrationEvent;
+			import com.thcchat.components.Camdow;
+			import com.thcchat.components.ChatGridRenderer;
+			import com.thcchat.components.ChatUserGridRenderer;
+			import com.thcchat.components.FileReceivePopup;
+			import com.thcchat.components.ImagePopup;
+			import com.thcchat.components.LoginPopup;
+			import com.thcchat.components.PMPopup;
+			import com.thcchat.components.YouTubeInputPopup;
+			import com.thcchat.components.YouTubePopup;
+			import com.thcchat.entities.*;
+			import com.thcchat.events.CamSpotEvent;
+			import com.thcchat.events.ChatUserEvent;
+			import com.thcchat.events.LoginEvent;
+			import com.thcchat.services.*;
+			import com.thcchat.util.ExternalInterfaceUtil;
+			
+			import flashx.textLayout.elements.TextFlow;
+			
+			import flex.utils.spark.resize.ResizablePanelSkin;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.ArrayList;
+			import mx.collections.IViewCursor;
+			import mx.collections.ListCollectionView;
+			import mx.controls.Alert;
+			import mx.controls.Image;
+			import mx.core.IVisualElement;
+			import mx.core.UIComponent;
+			import mx.events.CloseEvent;
+			import mx.events.CollectionEvent;
+			import mx.graphics.BitmapFill;
+			import mx.managers.PopUpManager;
+			import mx.messaging.ChannelSet;
+			import mx.messaging.channels.AMFChannel;
+			import mx.messaging.events.MessageEvent;
+			import mx.messaging.messages.AsyncMessage;
+			import mx.utils.Base64Encoder;
+			
+			import org.granite.gravity.Consumer;
+			import org.granite.gravity.Producer;
+			import org.granite.gravity.channels.GravityChannel;
+			import org.granite.reflect.IVisitableElement;
+			import org.granite.tide.Tide;
+			import org.granite.tide.data.Conflicts;
+			import org.granite.tide.data.DataObserver;
+			import org.granite.tide.data.OptimisticLockExceptionHandler;
+			import org.granite.tide.data.UninitializeArgumentPreprocessor;
+			import org.granite.tide.data.events.TideDataConflictsEvent;
+			import org.granite.tide.events.TideContextEvent;
+			import org.granite.tide.events.TideEvent;
+			import org.granite.tide.events.TideFaultEvent;
+			import org.granite.tide.events.TideResultEvent;
+			import org.granite.tide.service.DefaultServiceInitializer;
+			import org.granite.tide.spring.Identity;
+			import org.granite.tide.spring.Spring;
+			
+			import spark.components.VideoPlayer;
+			import spark.core.NavigationUnit;
+			import spark.events.IndexChangeEvent;
+			import spark.primitives.BitmapImage;
+			import spark.utils.TextFlowUtil;
+			
+			private const revision:String = "$Revision: 35 $";
+			private const clientVersion:String = "LiftedChat v1.2.0";
+			
+			private var consumer:Consumer;
+			private var producer:Producer;
+			
+			private var dConsumer:Consumer;
+			private var dProducer:Producer;
+			
+			private var nc:NetConnection;
+			private var playStream:NetStream;
+			
+			private var nickname:String;
+			private var fbName:String;
+			private var fb_id:Number;
+			private var selectedUser:ChatUser;
+			private var publishing:Boolean = false;
+			private var currentRoomId:int = 1;
+			
+			[Bindable]
+			public var chatUser:ChatUser;
+			
+			[Bindable]
+			private var currentRoom:ChatRoom;
+			
+			private var camStreams:Dictionary = new Dictionary();
+			private var avPermissions:Dictionary = new Dictionary();
+			
+			private var pmWindows:Dictionary = new Dictionary();
+			
+			private var pings:Dictionary = new Dictionary();
+			
+			[Inject]
+			[Bindable]
+			public var chatService:ChatService;
+			
+			[Inject]
+			[Bindable]
+			public var uploadService:ChatUploadService;
+			
+			[In]
+			public var dataTopic:DataObserver;
 
+			private var wp_user_id:Number;
+			
+			private var pingTimer:Timer = new Timer(5000);
+			
+			private var noticeId:Number;
+			
+			private var inputHistory:ArrayCollection = new ArrayCollection();
+			
+			private var localServer:Boolean;
+
+			//Sounds
+//			[Embed(source="assets/sounds/bump_up.mp3")]
+
+
+			[Embed(source="assets/sounds/beep1.mp3")]
+			private var beep1Class:Class;
+			
+			[Embed(source="assets/sounds/join.mp3")]
+			private var joinClass:Class;
+			
+			[Embed(source="assets/sounds/leave.mp3")]
+			private var leaveClass:Class;
+			
+			[Embed(source="assets/sounds/pm.mp3")]
+			private var pmSoundClass:Class;
+			
+			private var beep1:Sound = new beep1Class() as Sound;
+			private var sndPm:Sound = new pmSoundClass() as Sound;
+			private var sndJoin:Sound = new joinClass() as Sound;
+			private var sndLeave:Sound = new leaveClass() as Sound;
+			
+			public var fxVolume:Number = 100;
+			
+			private var fxTransform:SoundTransform = new SoundTransform();
+			
+			private var bgLoader:Loader;
+			private var bgNumber:int = 0;
+			
+			public var fontSize:String = "16";
+			public var fontWeight:String = "normal";
+			public var fontColor:uint = 0;
+			public var fontFamily:String = "Verdana";
+			
+			private var imagePostFR:FileReference;
+			private var imagePostLoader:Loader = new Loader();
+			
+			private var nextTabIndex:int = 2;
+			
+			private var loginPopup:LoginPopup;
+			
+			private function preInit():void
+			{
+				currentState = "main";
+				registerAliases();
+				Spring.getInstance().initApplication();
+				Spring.getInstance().addComponents([UninitializeArgumentPreprocessor]);
+				Spring.getInstance().addComponent("dataTopic", DataObserver);
+				Spring.getInstance().addEventObserver("org.granite.tide.login", "dataTopic", "subscribe");
+				Spring.getInstance().addEventObserver("org.granite.tide.logout", "dataTopic", "unsubscribe");
+				Spring.getInstance().getSpringContext()['dataTopic'].subscribe();
+/* 				
+				Spring.getInstance().addExceptionHandler(OptimisticLockExceptionHandler);
+				Spring.getInstance().getSpringContext().addEventListener(TideDataConflictsEvent.DATA_CONFLICTS, conflictsHandler);
+				Tide.getInstance().addExceptionHandler(OptimisticLockExceptionHandler);
+				Tide.getInstance().getContext().addEventListener(TideDataConflictsEvent.DATA_CONFLICTS, conflictsHandler); */
+ 			}
+			
+			private function init():void
+			{
+				localServer = false;
+				
+				if(localServer)
+				{
+					Tide.getInstance().addComponentWithFactory("serviceInitializer", DefaultServiceInitializer, {serverPort: "8081", serverName: "10.0.0.11", contextRoot: "/lifted"});
+				}
+				else
+				{
+					// Define service endpoint resolver
+					Tide.getInstance().addComponentWithFactory("serviceInitializer", DefaultServiceInitializer, {serverPort: "8081", serverName: "216.120.236.18", contextRoot: "/lifted"});
+				}
+				
+				pingTimer.addEventListener(TimerEvent.TIMER, pingTimerFired);
+				
+				loadBackground("assets/backgrounds/background.jpg");
+
+				//Show login
+				loginPopup = new LoginPopup();
+				loginPopup.addEventListener("loginAttempt", loginAttempt);
+				loginPopup.addEventListener("userRegister", userRegister);
+				PopUpManager.addPopUp(loginPopup, this, true);
+				PopUpManager.centerPopUp(loginPopup);
+				PopUpManager.bringToFront(loginPopup);
+			}
+			
+			private function loginAttempt(event:LoginEvent):void
+			{
+				chatService.userLogin(event.username, event.password, userLoginResult, userLoginFault);
+			}
+			
+			private function userRegister(event:RegistrationEvent):void
+			{
+				
+				chatService.userRegister(event.username, event.password, "", "", "", "", "", "",
+					userRegisterResult);	
+			}
+			
+			private function userRegisterResult(event:TideResultEvent):void
+			{
+				var chatUser:ChatUser = event.result as ChatUser;
+				if(chatUser == null)
+				{
+					loginPopup.registerResult(false);
+				}
+				else
+				{
+					//var PNGEnc:PNGEncoder = new PNGEncoder();
+					//var b64:Base64Encoder = new Base64Encoder();
+					//b64.encodeBytes(PNGEnc.encode(loginPopup.regPopup.imgAvatar.bitmapData));
+					//uploadAvatar(b64.toString(), chatUser);
+					loginPopup.registerResult(true);
+				}
+			}
+			
+			private function pingTimerFired(event:TimerEvent):void
+			{
+				if(currentState == "main" && chatUser != null)
+				{
+					//Respond with PONG header set to keep alive connection.
+					var pMsg:AsyncMessage = new AsyncMessage();
+					pMsg.headers.PONG = chatUser.id;
+					producer.send(pMsg);
+				}
+			}
+			
+			private function registerAliases():void
+			{
+				registerClassAlias("com.thcchat.entities.ChatRoomType", ChatRoomType);
+				registerClassAlias("com.thcchat.entities.ChatRoom", ChatRoom);
+				registerClassAlias("com.thcchat.entities.ChatUserType", ChatUserType);
+				registerClassAlias("com.thcchat.entities.ChatPermission", ChatPermission);
+				registerClassAlias("com.thcchat.entities.ChatUser", ChatUser);
+				registerClassAlias("com.thcchat.entities.ChatOptions", ChatOptions);
+				registerClassAlias("com.thcchat.entities.ChatProfile", ChatProfile);
+				registerClassAlias("com.thcchat.entities.MicrophoneProfile", MicrophoneProfile);
+				registerClassAlias("com.thcchat.entities.CameraProfile", CameraProfile);
+				registerClassAlias("com.thcchat.entities.ChatUpload", ChatUpload);
+				registerClassAlias("com.thcchat.entities.Activity", Activity);
+				registerClassAlias("com.thcchat.entities.ActivityType", ActivityType);
+			}
+			
+			private function createMessageSelector():String
+			{
+				var msgSelector:String = "type='COMMAND' OR type='CAMSPOT' OR type='ROOM' OR type='SYSTEM' OR (type='PRIVATE' AND userId='" + chatUser.id + "') OR (type='MEDIA' AND userId='" + chatUser.id + "')";
+				return msgSelector;
+			}
+			
+			private function connect():void
+			{
+				// Setup RTMP connection
+ 				nc = new NetConnection( );
+				nc.client = new Object();
+				nc.objectEncoding = ObjectEncoding.AMF3;
+				nc.addEventListener(NetStatusEvent.NET_STATUS, netStatusHandler);
+				//nc.client = { onBWDone: function():void{ trace("onBWDone") } };
+				nc.connect("rtmp://www.thc-chat.com/oflaDemo");
+				
+				//Setup chat message channels
+				consumer = new Consumer();
+				var channelSet:ChannelSet = new ChannelSet();
+				if(localServer)
+				{
+					channelSet.addChannel(new GravityChannel("gravityamf", "http://10.0.0.11:8081/lifted/gravityamf/amf"));
+				}
+				else
+				{
+					channelSet.addChannel(new GravityChannel("gravityamf", "http://216.120.236.18:8081/lifted/gravityamf/amf"));
+				}
+				
+				consumer.channelSet = channelSet;
+				consumer.destination = "lifted";
+				consumer.topic = "*";
+				consumer.selector = createMessageSelector();
+				consumer.subscribe();
+				consumer.addEventListener(MessageEvent.MESSAGE, messageHandler);
+				
+				producer = new Producer();
+				producer.channelSet = channelSet;
+				producer.destination = "lifted";
+				producer.topic = "chat";
+				
+				//webcam.producer = producer;
+				
+				userListComplete();
+			}
+			
+			private function netStatusHandler(event:NetStatusEvent):void
+			{
+				switch (event.info.code) {
+					case "NetConnection.Connect.Success" :
+						//Alert.show("Connected", "Media Server");
+						trace("Connected to media server");
+						break;
+					case "NetConnection.Connect.Failed" :
+						Alert.show("Connection Failed", "Media Server");
+						trace("Connection to media server failed");
+						break;
+					case "NetConnection.Connect.Rejected" :
+						Alert.show("The connection failed", "Media Connection Error");
+						trace("The connection was rejected");
+						break;
+					case "NetStream.Play.Stop" :
+						trace("The stream has finished playing");
+						break;
+					case "NetStream.Play.StreamNotFound" :
+						Alert.show("The media stream was not found", "Media Connection Error");
+						trace("The server could not find the stream you specified");
+						break;
+					case "NetStream.Publish.BadName" :
+						Alert.show("The stream name is already used", "Media Connection Error");
+						trace("The stream name is already used");
+						
+						break;
+				}
+			}
+			
+			private function dMessageHandler(event:MessageEvent):void
+			{
+				//chatMessage("Dynamic", String(event.message.body), msg.timestamp);
+			}
+			
+			private function disconnect():void {
+				consumer.unsubscribe();
+				consumer.channelSet.disconnectAll();
+				consumer.disconnect();
+				consumer = null;
+				producer.channelSet.disconnectAll();
+				producer.disconnect();
+				producer = null;
+			}
+			
+			private function messageHandler(event:MessageEvent):void {
+
+				var msg:AsyncMessage = event.message as AsyncMessage;
+				
+				var fUser:ChatUser;
+				
+				switch(msg.headers.type)
+				{
+					case "COMMAND":
+						switch(msg.headers.command)
+						{
+							case "PING":
+								//Respond with PONG header set to keep alive connection.
+								var pMsg:AsyncMessage = new AsyncMessage();
+								pMsg.headers.PONG = chatUser.id;
+								producer.send(pMsg);
+								break;
+							case "RELOAD":
+								reload();
+								//systemMessage("Received a RELOAD command");
+								break;
+							case "LOGOUT":
+								if(msg.headers.userId == chatUser.id)
+								{
+									logout();
+								}
+								break;
+							case "RESTART":
+								logout();
+								break;
+						}
+						break;
+					
+					case "CAMSPOT":
+						var spotNo:int = msg.headers.spotNumber;
+						
+						if(msg.headers.action == "get")
+						{
+							//Alert.show("CAMSPOT " + spotNo + " Started");
+							chatService.loadCamSpot(1, spotNo, camSpotLoaded);
+						}
+						else if(msg.headers.action == "leave")
+						{
+							//Alert.show("CAMSPOT " + spotNo + " Stopped");
+							resetCamSpot(spotNo);
+						}
+						break;
+					
+					case "ROOM":
+						
+						fUser = ChatUser(msg.body);
+						
+						if(msg.headers.imageUrl)
+						{
+							imageMessage(fUser, msg.headers.message, msg.headers.imageUrl);
+						}
+						else if(msg.headers.videoId)
+						{
+							youTubeMessage(fUser, msg.headers.message, msg.headers.videoId);
+						}
+						else if(msg.headers.action)
+						{
+							actionMessage(fUser, msg.headers.message, msg.timestamp);
+						}
+						else
+						{
+							if(chatUser.ignores.contains(fUser))
+							{
+								//Ignored
+							}
+							else
+							{
+								chatMessage(fUser, msg.headers.message, msg.timestamp);
+							}
+							
+							//BOT test
+/* 							if(String(msg.headers.message).indexOf("uis") != -1)
+							{
+								sendRoomMessage(1, "What? " + msg.body.nickname);
+							} */
+						}
+						
+						if(!chatUser.chatOptions.muteChat)
+							beep1.play(0,1, fxTransform);
+						break;
+					
+					/* case "MEDIA":
+						fUser = ChatUser(msg.body);
+						var com:String = msg.headers.command;
+						if(com == "start")
+						{
+							chatMessage(fUser, "[MEDIA] " + fUser.nickname + " Started viewing your media stream!", msg.timestamp);
+							if(!chatUser.chatOptions.muteSystem)
+								sndPm.play(0,1, fxTransform);
+							reload();
+						}
+						else if(com == "stop")
+						{
+							chatMessage(fUser, "[MEDIA] " + fUser.nickname + " Stopped viewing your media stream!", msg.timestamp);
+							if(!chatUser.chatOptions.muteSystem)
+								sndPm.play(0,1, fxTransform);
+							reload();
+						}
+						else if(com == "closeCam")
+						{
+							userCamClicked(new ChatUserEvent("closeCam", fUser));
+						}
+						
+						break; */
+					
+					case "PRIVATE":
+						
+						fUser = ChatUser(msg.body);
+						var uIdx:int = userList.dataProvider.getItemIndex(fUser);
+						var cu:ChatUser = userList.dataProvider.getItemAt(uIdx) as ChatUser;
+						
+						if(msg.headers.PING)
+						{
+							//Respond with PONG header set to keep alive connection.
+							var pongMsg:AsyncMessage = new AsyncMessage();
+							pongMsg.headers.PONG = chatUser.id;
+							pongMsg.headers.type = "PRIVATE";
+							pongMsg.headers.userId = fUser.id;
+							pongMsg.headers.ts = new Date().time;
+							pongMsg.body = chatUser;
+							producer.send(pongMsg);
+							break;
+						}
+						
+						if(msg.headers.PONG)
+						{
+							//Display PING results
+							var sendTs:Number = pings[fUser.id];
+							var receiveTs:Number = msg.headers.ts;
+							var rttTs:Number = new Date().time;
+							pings[fUser.id] = null;
+							var pingString:String = "Ping response from " + fUser.nickname + ". Round Trip Time:" + (rttTs-sendTs) + "ms.";
+							//systemMessage(pingString, msg.timestamp);
+							privateMessage(fUser, pingString, msg.timestamp);
+							break;
+						}
+						
+						if(msg.headers.notice)
+						{
+							Alert.show(String(msg.headers.message), String(msg.headers.title), Alert.OK, this, closeNotice);
+							sndPm.play(0, 3, fxTransform);
+							noticeId = fUser.id;
+							break;
+						}
+						
+						if(msg.headers.noticeReply)
+						{
+							systemMessage(fUser.nickname + " clicked 'OK' on your notice alert.", new Date().time);
+							if(!chatUser.chatOptions.muteSystem)
+								beep1.play(0,1, fxTransform);
+							break;
+						}
+						
+						if(msg.headers.fileName)
+						{
+							if(chatUser.ignores.contains(fUser))
+							{
+								//Ignored
+							}
+							else
+							{
+								var pu:FileReceivePopup = new FileReceivePopup();
+								pu.chatUser = fUser;
+								pu.fileName = msg.headers.fileName;
+								PopUpManager.addPopUp(pu, this);
+								PopUpManager.centerPopUp(pu);
+								PopUpManager.bringToFront(pu);
+								if(!chatUser.chatOptions.mutePrivate)
+									sndPm.play(0,2, fxTransform);
+							}
+							break;
+						}
+						
+						if(msg.headers.viewing == "true")
+						{
+							
+							break;
+						}
+						else if(msg.headers.viewing == "false")
+						{
+							chatMessage(fUser, "[MEDIA] " + fUser.nickname + " Stopped viewing your media stream!", msg.timestamp);
+							//Turn off Eye Icon (not watching your stream)
+							var idx:int = chatUser.viewers.getItemIndex(cu);
+							if(idx != -1)
+							{
+								chatUser.viewers.removeItemAt(idx);
+								chatService.updateUser(chatUser, updateUserResult);
+							}
+							if(!chatUser.chatOptions.muteSystem)
+								sndPm.play(0,1, fxTransform);
+							
+							break;
+						}
+						
+						if(msg.headers.imageUrl)
+						{
+							imageMessage(fUser, "[PRIVATE] " + msg.headers.message, msg.headers.imageUrl);
+						}
+						else if(msg.headers.avRequest)
+						{
+						
+						}
+						else if(msg.headers.avResponse)
+						{
+							
+						}
+						/* else if(msg.headers.avRequest)
+						{
+							//Check if user is in the blocks list
+							if( chatUser.blocks.contains(fUser) )
+							{
+								sendAVResponse(fUser.id, "false");
+							}
+							else
+							{
+								sendAVResponse(fUser.id, "true");
+								chatMessage(fUser, "[MEDIA] " + fUser.nickname + " Started viewing your media stream!", msg.timestamp);
+								chatUser.viewers.addItem(cu);
+								chatService.updateUser(chatUser, updateUserResult);
+								if(!chatUser.chatOptions.muteSystem)
+									sndPm.play(0,1, fxTransform);
+							}
+						}
+						else if(msg.headers.avResponse)
+						{
+							//systemMessage("A/V permission Response: " + msg.headers.avResponse, new Date().time);
+							var cDow:Camdow = camStreams[fUser.nickname] as Camdow;
+							
+							if(msg.headers.avResponse == "true")
+							{
+								//avPermissions[fUser.id] == true;	
+								//Display
+								if(cDow)
+								{
+									cDow.start();
+								}
+							}
+							else
+							{
+								//avPermissions[fUser.id] == false;
+								if(cDow)
+								{
+									cDow.stop();
+									if(cDow.docked)
+									{
+										var evt2:ChatUserEvent = new ChatUserEvent("camdowDock", fUser);
+										camdowDock(evt2);
+									}
+									
+									sendViewingMessage(cDow.user.id, "false");
+									camStreams[fUser.nickname] = null;
+									PopUpManager.removePopUp(cDow);
+									cDow = null;
+								}
+							}
+						} */
+						else
+						{
+							if(chatUser.ignores.contains(fUser))
+							{
+								//Ignored
+							}
+							else
+							{
+								privateMessage(fUser, msg.headers.message, msg.timestamp);
+								if(!chatUser.chatOptions.mutePrivate)
+									sndPm.play(0,1, fxTransform);
+							}
+						}
+						break;
+					
+					case "SYSTEM":
+						var mUser:ChatUser;
+						if(msg.headers.join)
+						{
+							mUser =  msg.body as ChatUser;
+							systemMessage(mUser.nickname + msg.headers.message, msg.timestamp);
+							if(!chatUser.chatOptions.muteSystem)
+								sndJoin.play(0, 1, fxTransform);
+						}
+						else if(msg.headers.leave)
+						{
+							mUser =  msg.body as ChatUser;
+							systemMessage(mUser.nickname + msg.headers.message, msg.timestamp);
+							
+							//viewers.splice(viewers.indexOf(mUser.id), 1);
+							
+							if(!chatUser.chatOptions.muteSystem)
+								sndLeave.play(0, 1, fxTransform);
+						}
+						else
+						{
+							systemMessage(msg.headers.message, msg.timestamp);
+							if(!chatUser.chatOptions.muteSystem)
+								sndLeave.play(0, 1, fxTransform);
+						}
+						break;
+				}
+			}
+			
+			
+			private function reload():void
+			{
+				reloadRoom(1);
+			}
+			
+			private function sendRoomMessage(roomId:int, message:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "ROOM";
+				msg.headers.roomId = roomId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.message = message;
+				msg.body = chatUser;
+				
+				if(chatUser.hasPermission("room"))
+				{
+					producer.send(msg);
+				}
+				else
+				{
+					systemMessage("You are not allowed to send chat room messages!", new Date().time);
+					if(!chatUser.chatOptions.muteSystem)
+						beep1.play(0,1, fxTransform);
+				}
+			}
+			
+			private function sendPm(event:ChatUserEvent):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				msg.headers.userId = event.chatUser.id;
+				msg.headers.message = event.message;
+				msg.body = chatUser;
+				if(chatUser.hasPermission("pm"))
+				{
+					producer.send(msg);
+				}
+				else
+				{
+					systemMessage("You are not allowed to send private messages!", new Date().time);
+					if(!chatUser.chatOptions.muteSystem)
+						beep1.play(0,1, fxTransform);
+				}
+			}
+			
+			private function sendAdminPm(msgs:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				//upinsmoke
+				msg.headers.userId = 1;
+				msg.headers.message = msgs;
+				msg.body = chatUser;
+				//if(chatUser.hasPermission("pm"))
+				producer.send(msg);
+			}
+			
+			private function sendActionMessage(roomId:int, message:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "ROOM";
+				msg.headers.roomId = roomId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.message = message;
+				msg.headers.action = "true";
+				msg.body = chatUser;
+				if(chatUser.hasPermission("pm"))
+				{
+					producer.send(msg);
+				}
+				else
+				{
+					systemMessage("You are not allowed to send action (/me) messages!", new Date().time);
+					if(!chatUser.chatOptions.muteSystem)
+						beep1.play(0,1, fxTransform);
+				}
+			}
+			
+			private function sendYouTubeMessage(roomId:int, videoId:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "ROOM";
+				msg.headers.roomId = roomId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.message = videoId;
+				msg.headers.videoId = videoId;
+				msg.body = chatUser;
+				if(chatUser.hasPermission("pm"))
+				{
+					producer.send(msg);
+				}
+				else
+				{
+					systemMessage("You are not allowed to post YouTube videos!", new Date().time);
+					if(!chatUser.chatOptions.muteSystem)
+						beep1.play(0,1, fxTransform);
+				}
+			}
+			
+			private function sendSystemMessage(message:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "SYSTEM";
+				msg.headers.message = message;
+				msg.body = message;
+				producer.send(msg);
+			}
+			
+			private function sendJoinMessage(message:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "SYSTEM";
+				msg.headers.message = message;
+				msg.headers.join = true;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function sendLeaveMessage(message:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "SYSTEM";
+				msg.headers.message = message;
+				msg.headers.leave = true;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function sendCommandMessage(userId:Number, command:String, args:Object=null):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "COMMAND";
+				msg.headers.command = command;
+				msg.headers.userId = userId;
+				msg.body = args;
+				producer.send(msg);
+			}
+			
+			private function sendFileMessage(userId:int, fileName:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				msg.headers.userId = userId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.message = fileName;
+				msg.headers.fileName = fileName;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function userLoginResult(event:TideResultEvent):void
+			{
+				chatUser = event.result as ChatUser;
+				
+				if(chatUser == null)
+				{
+					loginPopup.enable();
+					Alert.show("Wrong Nickname or Password!", "Login Failed!");
+				}
+				else if(chatUser.hasPermission("login"))
+				{
+					PopUpManager.removePopUp(loginPopup);
+					connect();
+					joinRoom(1);
+					webcam.init();
+					
+					//Send a PONG to notify ChatManager thread we are really online
+					var pMsg:AsyncMessage = new AsyncMessage();
+					pMsg.headers.PONG = chatUser.id;
+					producer.send(pMsg);
+				
+					//rssTimer.start();
+					//pingTimer.start();
+					
+					//Load user cam spots
+					
+					//TEST toke timer
+					//startTokeTimer(60);
+					//chatService.joinActivity(16, chatUser);
+					this.fontSize = chatUser.chatOptions.fontSize;
+					this.fontFamily = chatUser.chatOptions.fontFamily;
+					this.fontColor = uint(chatUser.chatOptions.fontColor);
+					
+				}
+				else
+				{
+					connect();
+					sendAdminPm(chatUser.nickname + " attempted to login but does not have the Login permission.");
+					//disconnect();
+					//Alert.show(chatUser.type.permissions.toString());
+					chatService.userLogout(chatUser.wp_user_id);
+					currentState = "login";
+					
+				}
+			}
+			
+			private function updateUserResult(event:TideResultEvent):void
+			{
+				chatUser = event.result as ChatUser;
+			}
+			
+			private function startTokeTimer(delay:Number):void
+			{
+				var act:Activity = new Activity();
+				act.users = new ArrayCollection();
+				act.users.addItem(chatUser);
+				act.title = "Toke Time!";
+				act.startDelay = 0;
+				act.activityTime = delay*1000;
+				act.updateDelay = 5000;
+				act.count = 0;
+				act.startTime = new Date();
+				chatService.newActivity(act, chatUser, activityAdded);
+			}
+			
+			private function activityAdded(event:TideResultEvent):void
+			{
+				var act:Activity = event.result as Activity;
+				var pMsg:AsyncMessage = new AsyncMessage();
+				pMsg.headers.STARTACTIVITY = act.id;
+				pMsg.headers.userId = chatUser.id;
+				producer.send(pMsg);
+			}
+			
+			private function joinRoom(roomId:Number):void
+			{
+				chatService.joinRoom(chatUser, roomId, joinRoomResult, joinRoomFault);
+			}
+			
+			private function joinRoomResult(event:TideResultEvent):void
+			{
+				currentRoom = event.result as ChatRoom;
+				grdChat.title = currentRoom.name + " - " + currentRoom.topic;
+				sendJoinMessage(" has entered.");
+				
+				hostBanner.setHostBannerText(currentRoom.topic);
+				if(chatUser.hasPermission("host"))
+				{
+					hostBanner.isAdmin = true;
+				}
+				else
+				{
+					hostBanner.isAdmin = false;
+				}
+				loadCamSpots();
+			}
+			
+			private function reloadRoom(roomId:Number):void
+			{
+				//Tide.showBusyCursor = false;
+				chatService.getRoom(roomId, reloadRoomResult, joinRoomFault);
+				//Tide.showBusyCursor = true;
+			}
+			
+			private function reloadRoomResult(event:TideResultEvent):void
+			{
+				currentRoom = event.result as ChatRoom;
+				//grdChat.title = currentRoom.name + " - " + currentRoom.topic;
+				hostBanner.setHostBannerText(currentRoom.topic);
+				if(chatUser.hasPermission("host"))
+				{
+					hostBanner.btnChangeTopic.visible = true;
+				}
+				else
+				{
+					hostBanner.btnChangeTopic.visible = false;
+				}
+			}
+			
+			private function joinRoomFault(event:TideFaultEvent):void
+			{
+				Alert.show(event.fault.faultDetail);
+				//Alert.show("An error occurred. There may have been a software update,  Please hold SHIFT while clicking the Refresh or Reload button in your browser.  If you still recieve this error please clear your browser cache and try again.", "SYSTEM ERROR (join room)");
+			}
+			
+			private function userLoginFault(event:TideFaultEvent):void
+			{
+				Alert.show(event.fault.faultDetail);
+				//Alert.show("An error occurred. There may have been a software update,  Please hold SHIFT while clicking the Refresh or Reload button in your browser.  If you still recieve this error please clear your browser cache and try again.", "SYSTEM ERROR (Login)");
+			}
+			
+			private function systemMessage(msg:String, ts:Number):void
+			{
+				var user:ChatUser = new ChatUser();
+				user.nickname = "SYSTEM";
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				msgItem.message = msg;
+				msgItem.timestamp = new Date(ts);
+				grdChat.messages.addItem(msgItem);
+				//scrollToBottom();
+			}
+			
+			private function chatMessage(userObj:Object, msg:String, ts:Number):void
+			{
+				var user:ChatUser = ChatUser(userObj);
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				
+				msgItem.message = msg;
+				msgItem.timestamp = new Date(ts);
+				grdChat.messages.addItem(msgItem);
+				//scrollToBottom();
+			}
+			
+			private function actionMessage(userObj:Object, msg:String, ts:Number):void
+			{
+				var user:ChatUser = ChatUser(userObj);
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				msgItem.message = msg;
+				msgItem.timestamp = new Date(ts);
+				msgItem.actionMessage = true;
+				grdChat.messages.addItem(msgItem);
+				//scrollToBottom();
+			}
+			
+			private function imageMessage(userObj:Object, msg:String, url:String):void
+			{
+				var user:ChatUser = ChatUser(userObj);
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				msgItem.message = msg;
+				msgItem.imageMessage = true;
+				msgItem.imageUrl = url;
+				grdChat.messages.addItem(msgItem);
+				//scrollToBottom();
+			}
+			
+			private function youTubeMessage(userObj:Object, msg:String, videoId:String):void
+			{
+				var user:ChatUser = ChatUser(userObj);
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				msgItem.message = msg;
+				msgItem.videoId = videoId;
+				grdChat.messages.addItem(msgItem);
+				//scrollToBottom();
+			}
+			
+			private function scrollToBottom():void {
+				// update the verticalScrollPosition to the end of the List
+				// virtual layout may require us to validate a few times
+				var delta:Number = 0;
+				var count:int = 0;
+				while (count++ < 10){
+					grdChat.validateNow();
+					//delta = grdChat.grid.layout.getVerticalScrollPositionDelta(NavigationUnit.END);
+					//grdChat.grid.layout.verticalScrollPosition += delta;
+					
+					if (delta == 0)
+						break;
+				}
+			}
+			
+			private function privateMessage(from:Object, msg:String, ts:Number):void
+			{
+				var user:ChatUser = ChatUser(from);
+				var msgItem:ChatMessage = new ChatMessage();
+				msgItem.chatUser = user;
+				msgItem.message = msg;
+				msgItem.timestamp = new Date(ts);
+				
+				var evt:ChatUserEvent = new ChatUserEvent("receivePm", user);
+				if(pmWindows[user.nickname])
+				{
+					pmWindows[user.nickname].visible = true;
+					PopUpManager.bringToFront(pmWindows[user.nickname]);
+					pmWindows[user.nickname].grdChat.messages.addItem(msgItem);
+				}
+				else
+				{
+					openPm2(evt, msgItem);
+				}
+			}
+			
+			protected function btnSend_clickHandler(event:MouseEvent):void
+			{
+				if(txtInput.text != "" && txtInput.text != " ")
+				{
+					var ttxt:String = txtInput.text;
+					
+					//save input in history
+					inputHistory.addItem(ttxt);
+					
+					if(ttxt.substr(0, 1) == "/")
+					{
+						if(ttxt.substr(0, 4) == "/me ")
+						{
+							sendActionMessage(currentRoomId, txtInput.text.substr(4));
+						}
+						else if(ttxt.substr(0, 6) == "/sick ")
+						{
+							var newNick:String = ttxt.substr(6);
+							var oldNick:String = chatUser.nickname;
+							sendActionMessage(currentRoomId, "changed their nickname to " + newNick);
+							chatUser.nickname = newNick;
+							chatService.updateEntity(chatUser, updateUserResult);
+						}
+						else if(ttxt.substr(0, 4) == "/yt ")
+						{
+							var videoId:String = ttxt.substr(4);
+							sendYouTubeMessage(currentRoomId, videoId);
+						}
+						
+					}
+					else
+					{
+						sendRoomMessage(currentRoomId, txtInput.text);
+					}
+					
+					txtInput.text = "";
+				}
+				
+			}
+			
+			protected function btnLogout_clickHandler(event:MouseEvent):void
+			{
+				logout();
+			}
+			
+			protected function logout():void
+			{
+				//Close camdows and notify users
+				/* if(camStreams)
+				{
+					for(var nick:String in camStreams)
+					{
+						var camDow:Camdow = Camdow(camStreams[nick]);
+						if(camDow)
+						{
+							camDow.stop();
+							PopUpManager.removePopUp(camDow);
+							sendViewingMessage(camDow.user.id, "false");
+							camStreams[nick] = null;
+							camDow = null;
+						}
+					}
+				} */
+				
+				sendLeaveMessage(" was disconnected.");
+				chatService.userLogout(chatUser.wp_user_id, logoutComplete);
+				
+			}
+			
+			private function logoutComplete(event:TideResultEvent):void
+			{
+				disconnect();
+				Spring.getInstance().getSpringContext()['dataTopic'].unsubscribe();
+				nc.close();
+				nc = null;
+				
+				if(pmWindows)
+				{
+					for(var nick2:String in pmWindows)
+					{
+						PopUpManager.removePopUp(pmWindows[nick2]);
+					}
+				}
+				
+				camStreams = new Dictionary();
+				pmWindows = new Dictionary();
+				currentState = "login";
+				pingTimer.stop();
+			}
+			
+/* 			private function userEvent(event:ChatUserEvent):void
+			{
+				switch(event.type)
+				{
+					case "chatUserJoin":
+						systemMessage(event.chatUser.nickname + " has joined the room");
+						break;
+					case "chatUserLeave":
+						systemMessage(event.chatUser.nickname + " has left the room");
+						break;
+					case "chatUserQuit":
+						systemMessage(event.chatUser.nickname + " has quit");
+						break;
+				}
+				
+			} */
+			
+/* 			private function userJoin(event:CollectionEvent):void
+			{
+				//Alert.show(String(event.items.length));
+				var items:Array = event.items;
+				var cu:ChatUser = ChatUser(items.pop());
+				if(cu != null)
+					systemMessage(cu.nickname + " has joined the room");
+			} */
+			
+			private function userListComplete():void
+			{
+				//addEventListener("chatUserJoin", userEvent);
+				//addEventListener("chatUserLeave", userEvent);
+				addEventListener("chatUserWhois", whoisUser);
+				addEventListener("pingUser", pingUser);
+				addEventListener("noticeUser", noticeUser);
+				addEventListener("disconnectUser", disconnectUser);
+				//addEventListener("chatUserCamClick", userCamClicked);
+				//addEventListener("chatUserClick", userClicked);
+				addEventListener("sendPm", sendPm);
+				addEventListener("openPm", openPm);
+				addEventListener("sendFile", sendFile);
+				addEventListener("giveCookie", giveCookie);
+				
+				addEventListener("allowView", allowView);
+				addEventListener("ignoreUser", ignoreUser);
+							
+				addEventListener("changeChatBG", changeChatBG);
+				addEventListener("fontSizeChanged", fontSizeChanged);
+				addEventListener("fontFamilyChanged", fontFamilyChanged);
+				addEventListener("fontColorChanged", fontColorChanged);
+				addEventListener("fxVolumeChanged", fxVolumeChanged);
+				addEventListener("maxHistoryChanged", maxHistoryChanged);
+				
+				addEventListener("muteSystem", mutesChanged);
+				addEventListener("muteChat", mutesChanged);
+				addEventListener("mutePrivate", mutesChanged);
+				
+				addEventListener("camSpotClick", camSpotClick);
+				
+				hostBanner.addEventListener("changeTopic", changeTopic);
+				
+				pingTimer.start();
+			}
+			
+			private function disconnectUser(event:ChatUserEvent):void
+			{
+				Alert.show("Disconnect "+event.chatUser.nickname+"?", "Disconnect User", (Alert.YES | Alert.CANCEL), this, confirmDisconnect);
+			}
+			
+			private function confirmDisconnect(event:CloseEvent):void
+			{
+				if(event.detail == Alert.YES)
+				{
+					if(userList.selectedIndex)
+						sendCommandMessage(userList.selectedItem.id, "LOGOUT");
+				}
+			}
+			
+			private function closeNotice(event:CloseEvent):void
+			{
+				var nMsg:AsyncMessage = new AsyncMessage();
+				nMsg.headers.type = "PRIVATE";
+				nMsg.headers.noticeReply = "true";
+				nMsg.headers.userId = noticeId;
+				nMsg.body = chatUser;
+				if(producer)
+					producer.send(nMsg);
+			}
+			
+			private function whoisUser(event:ChatUserEvent):void
+			{
+				var msg:String = event.chatUser.nickname + " - Last login: " + lastLoginFormatter.format(event.chatUser.lastLogin);
+				msg += "   Login count: " + event.chatUser.loginCount;
+				msg += "   Chat ID: " + event.chatUser.id;
+				msg += "   Durr Dollars: " + event.chatUser.points;
+				msg += "   Client IP: " + event.chatUser.clientIP;
+				systemMessage(msg, new Date().time);
+			}
+			
+			private function pingUser(event:ChatUserEvent):void
+			{
+				pings[event.chatUser.id] = new Date().time;
+				var pingMsg:AsyncMessage = new AsyncMessage();
+				pingMsg.headers.PING = pings[event.chatUser.id];
+				pingMsg.headers.type = "PRIVATE";
+				pingMsg.headers.userId = event.chatUser.id;
+				pingMsg.body = chatUser;
+				producer.send(pingMsg);
+			}
+			
+			private function noticeUser(event:ChatUserEvent):void
+			{
+				var nMsg:AsyncMessage = new AsyncMessage();
+				nMsg.headers.notice = "true";
+				nMsg.headers.title = "Notice from " + chatUser.nickname + "!";
+				nMsg.headers.message = String(event.message);
+				nMsg.headers.type = "PRIVATE";
+				nMsg.headers.userId = event.chatUser.id;
+				nMsg.body = chatUser;
+				producer.send(nMsg);
+			}
+			
+			private function userCamClicked(event:ChatUserEvent):void
+			{
+				var selectedUser:ChatUser = event.chatUser;
+				
+				if(selectedUser != null)
+				{
+					var cDow:Camdow;
+					if(camStreams[selectedUser.nickname])
+					{
+						cDow = camStreams[selectedUser.nickname] as Camdow;
+						cDow.stop();
+						
+					
+						camStreams[selectedUser.nickname] = null;
+						chatService.stopStream(selectedUser.id, chatUser.id);
+						//sendViewingMessage(selectedUser.id, "false");
+					}
+					else
+					{ 
+						//Check permission recieve in message handler
+						//sendAVRequest(selectedUser.id);
+						if(event.type == "chatUserCamClick")
+							chatService.startStream(selectedUser.id, chatUser.id, startStreamResult);
+					
+					}
+				}
+			}
+			
+			private function startStreamResult(event:TideResultEvent):void
+			{
+				var selectedUser:ChatUser = event.result as ChatUser;
+				if(selectedUser != null)
+				{
+					var cDow:Camdow = new Camdow();
+					if(nc == null || !nc.connected)
+					{
+						connect();
+					}
+					cDow.conn = nc;
+					cDow.styleName = "camdow";
+					cDow.id = selectedUser.nickname;
+					cDow.user = selectedUser;
+					cDow.docked = true;
+					//Add to list
+					camStreams[selectedUser.nickname] = cDow;
+					
+					//service handler starts camdow depending on avResponse
+					cDow.start();
+				}
+				else
+				{
+					//Alert.show("No Permission");
+				}
+			}
+			
+			private function sendViewingMessage(userId:Number, viewing:String):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				msg.headers.userId = userId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.viewing = viewing;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function sendAVRequest(userId:Number):void {
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				msg.headers.userId = userId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.avRequest = "true";
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function sendAVResponse(userId:Number, response:String):void
+			{
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "PRIVATE";
+				msg.headers.userId = userId;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.avResponse = response;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function showAVRequest(user:ChatUser):void
+			{
+				//Alert.show(user.nickname + " wants to view your Media Stream.  Yes to allow, No to block this user, Cancel to ignore.", "AV Request from " + user.nickname, (Alert.YES | Alert.NO | Alert.CANCEL | Alert.NONMODAL), this, AVRequestAnswer);
+			}
+			
+			private function userSelected(event:ChatUserEvent):void
+			{
+				var selection:ChatUser = event.chatUser;
+				var msg:String = selection.nickname + " has logged in " + selection.loginCount + " times.";
+				Alert.show(msg);
+			}
+			
+			protected function btnClear_clickHandler(event:MouseEvent):void
+			{
+				grdChat.dataProvider.removeAll();
+			}
+			
+			private function openPm(event:ChatUserEvent):void
+			{
+				var selectedUser:ChatUser = event.chatUser;
+				
+				if(selectedUser != null)
+				{
+					if(pmWindows[selectedUser.nickname])
+					{
+						if(pmWindows[selectedUser.nickname].visible)
+						{
+							if(pmWindows[selectedUser.nickname].x < 0 || pmWindows[selectedUser.nickname].y < 0)
+							{
+								pmWindows[selectedUser.nickname].x = 50;
+								pmWindows[selectedUser.nickname].y = 50;
+							}
+						}
+						else
+						{
+							pmWindows[selectedUser.nickname].visible = true;
+							PopUpManager.bringToFront(pmWindows[selectedUser.nickname]);
+						}
+					}
+					else
+					{ 
+						var pmPopup:PMPopup = new PMPopup();
+						pmPopup.toUser = selectedUser;
+						//Add to list
+						pmWindows[selectedUser.nickname] = pmPopup;
+						PopUpManager.addPopUp(pmPopup, this);
+						PopUpManager.bringToFront(pmPopup);
+						pmPopup.addEventListener("sendPm", sendPm);
+						pmPopup.txtInput.tabIndex = nextTabIndex;
+						nextTabIndex++;
+					}
+				}
+			}
+			
+			private function openPm2(event:ChatUserEvent, msg:ChatMessage):void
+			{
+				var selectedUser:ChatUser = event.chatUser;
+				
+				if(selectedUser != null)
+				{
+					if(pmWindows[selectedUser.nickname])
+					{
+						pmWindows[selectedUser.nickname].visible = true;
+						PopUpManager.bringToFront(pmWindows[selectedUser.nickname]);
+						pmWindows[selectedUser.nickname].grdChat.dataProvider.addItem(msg);
+					}
+					else
+					{ 
+						var pmPopup:PMPopup = new PMPopup();
+						pmPopup.toUser = selectedUser;
+						pmPopup.msg = msg;
+						//Add to list
+						pmWindows[selectedUser.nickname] = pmPopup;
+						PopUpManager.addPopUp(pmPopup, this);
+						PopUpManager.bringToFront(pmPopup);
+						pmPopup.addEventListener("sendPm", sendPm);
+						pmPopup.txtInput.tabIndex = nextTabIndex;
+						nextTabIndex++;
+					}
+				}
+			}
+			
+			private function sendFile(event:ChatUserEvent):void
+			{
+				sendFileMessage(event.chatUser.id, event.message);
+			}
+			
+			private function giveCookie(event:ChatUserEvent):void
+			{
+				var cu:ChatUser = event.chatUser;
+				cu.points++;
+				chatService.updateEntity(cu);
+				sendSystemMessage(cu.nickname + " received a Durrr Dollar! they now have " + cu.points.toString());
+			}
+			
+			private function userGridRendererFunction(item:Object, column:GridColumn):IFactory
+			{
+				var classFactory:ClassFactory;
+				classFactory = new ClassFactory(ChatUserGridRenderer);
+				if(chatUser != null)
+				{
+					classFactory.properties = {mainUser: chatUser};
+				}
+				return classFactory;
+			}
+			
+			private function openHomepage():void
+			{
+				navigateToURL(new URLRequest("http://www.thc-chat.com"),'_self') 
+			}
+			
+			private function youTubeInput():void
+			{
+				var ytp:YouTubeInputPopup = new YouTubeInputPopup;
+				ytp.addEventListener("postYouTube", postYouTube);
+				PopUpManager.addPopUp(ytp, this);
+				PopUpManager.centerPopUp(ytp);
+				PopUpManager.bringToFront(ytp);
+			}
+			
+			private function postYouTube(event:ChatUserEvent):void
+			{
+				sendYouTubeMessage(currentRoomId, event.message);
+			}
+	
+			public function getSnapWindow():DisplayObjectContainer
+			{
+				return grpSnap;
+			}
+			
+			
+			private function allowView(event:ChatUserEvent):void
+			{
+				var user:ChatUser = event.chatUser;
+	
+				if(chatUser.blocks.contains(user))
+				{
+					chatService.removeBlock(chatUser.id, user.id);
+					systemMessage(user.nickname + " can now view your media stream.", new Date().time);
+				}
+				else
+				{
+					chatService.addBlock(chatUser.id, user.id);
+					systemMessage(user.nickname + " is now Blocked from viewing your media stream.", new Date().time);
+					//sendAVResponse(user.id, "false");
+				}
+				
+				/* if(uIdx != -1)
+				{
+					var cu:ChatUser = userList.dataProvider.getItemAt(uIdx) as ChatUser;
+					//Toggle blocked
+					cu.blocked = !cu.blocked;
+					if(cu.blocked)
+					{
+						blocks.push(cu.id);
+						sendAVResponse(cu.id, "false");
+						systemMessage(cu.nickname + " is now Blocked from viewing your media stream.", new Date().time);
+					}
+					else
+					{
+						var idx:int = blocks.indexOf(cu.id);
+						blocks.splice(idx, 1);
+						sendAVResponse(cu.id, "true");
+						systemMessage(cu.nickname + " can now view your media stream.", new Date().time);
+					}
+				} */
+			}
+			
+			private function ignoreUser(event:ChatUserEvent):void
+			{
+				var user:ChatUser = event.chatUser;
+				
+				if(chatUser.ignores.contains(user))
+				{
+					chatService.removeIgnore(chatUser.id, user.id);
+					systemMessage(user.nickname + " is no longer Ignored.", new Date().time);
+				}
+				else
+				{
+					chatService.addIgnore(chatUser.id, user.id);
+					systemMessage(user.nickname + " is now Ignored.", new Date().time);
+				}
+				/* if(uIdx != -1)
+				{
+					var cu:ChatUser = userList.dataProvider.getItemAt(uIdx) as ChatUser;
+					//Toggle ignored
+					cu.ignored = !cu.ignored;
+					if(cu.ignored)
+					{
+						ignores.push(cu.id);
+						systemMessage(cu.nickname + " is now Ignored.", new Date().time);
+					}
+					else
+					{
+						var idx:int = ignores.indexOf(cu.id);
+						ignores.splice(idx, 1);
+						systemMessage(cu.nickname + " is no longer Ignored.", new Date().time);
+					}
+				} */
+			}
+			
+			private function toggleAway():void
+			{
+				if(chkAway.selected)
+				{
+					chatUser.away = true;
+					chatService.updateUser(chatUser);
+					sendActionMessage(currentRoom.id, "is away");
+				}
+				else
+				{
+					chatUser.away = false;
+					chatService.updateUser(chatUser);
+					sendActionMessage(currentRoom.id, "has returned");
+				}
+			}
+			
+			private function toggleScrollLock():void
+			{
+				if(chkScrollLock.selected)
+				{
+					grdChat.autoScroll = false;
+				}
+				else
+				{
+					grdChat.autoScroll = true;
+				}
+			}
+			
+			protected function keyHandler(event:KeyboardEvent):void
+			{
+				// TODO Auto-generated method stub
+				
+			}
+			
+			private function loadBackground(src:String="assets/backgrounds/bg1.jpg"):void
+			{
+				bgLoader = new Loader();
+				bgLoader.contentLoaderInfo.addEventListener(Event.COMPLETE, bgLoaded);
+				bgLoader.load(new URLRequest(src));
+			}
+			
+			private function bgLoaded(event:Event):void
+			{
+				var img:BitmapFill = new BitmapFill();
+				img.fillMode = "scale";
+				img.smooth = true;
+				img.source = bgLoader.content;
+				bcBG.backgroundFill = img;
+			}
+			
+			private function changeChatBG(event:Event):void
+			{
+				switch(bgNumber)
+				{
+					case 0:
+						loadBackground("assets/backgrounds/bg2.jpg");
+						break;
+					case 1:
+						loadBackground("assets/backgrounds/bg3.jpg");
+						break;
+					case 2:
+						loadBackground("assets/backgrounds/bg1.jpg");
+						break;
+				}
+				
+				if(++bgNumber == 3)
+					bgNumber = 0;
+			}
+			
+			private function fontSizeChanged(event:ChatUserEvent):void
+			{
+				chatUser.chatOptions.fontSize = event.message;
+				chatService.updateEntity(chatUser.chatOptions);
+			}
+			
+			private function fontFamilyChanged(event:ChatUserEvent):void
+			{
+				chatUser.chatOptions.fontFamily = event.message;
+				chatService.updateEntity(chatUser.chatOptions);
+			}
+			
+			private function fontColorChanged(event:ChatUserEvent):void
+			{
+				chatUser.chatOptions.fontColor = String(event.message);
+				chatService.updateEntity(chatUser.chatOptions);
+			}
+			
+			private function fxVolumeChanged(event:ChatUserEvent):void
+			{
+				fxVolume = Number(event.message);
+				fxTransform.volume = fxVolume/100;
+				sndLeave.play(0, 1, fxTransform);
+			}
+			
+			private function maxHistoryChanged(event:ChatUserEvent):void
+			{
+				grdChat.maxItems = int(event.message);
+			}
+
+			private function mutesChanged(event:Event):void
+			{
+				switch(event.type)
+				{
+					case "muteSystem":
+						chatUser.chatOptions.muteSystem = !chatUser.chatOptions.muteSystem;
+						break;
+					case "muteChat":
+						chatUser.chatOptions.muteChat = !chatUser.chatOptions.muteChat;
+						break;
+					case "mutePrivate":
+						chatUser.chatOptions.mutePrivate = !chatUser.chatOptions.mutePrivate;
+						break;
+				}
+				chatService.updateEntity(chatUser.chatOptions);
+
+			}
+			
+			
+			protected function browseImage(event:MouseEvent):void
+			{
+				// TODO Auto-generated method stub
+				imagePostFR = new FileReference();
+				imagePostFR.addEventListener("select", imageFileSelected);
+				imagePostFR.addEventListener("complete", imageFileLoaded);
+				var imagesFilter:FileFilter = new FileFilter("Images", "*.jpg;*.gif;*.png");
+				imagePostFR.browse([imagesFilter]);
+
+			}
+			
+			private function imageFileSelected(event:Event):void
+			{
+				imagePostFR.load();
+			}
+			
+			private function imageFileLoaded(event:Event):void
+			{
+				var b64:Base64Encoder = new Base64Encoder()
+				b64.encodeBytes( imagePostFR.data );
+				saveImageUpload(b64.toString());
+			}
+			
+			private function saveImageUpload(data:String):void
+			{
+				var ul:ChatUpload = new ChatUpload();
+				ul.chatUser = chatUser;
+				ul.base64data = data;
+				ul.fileName = chatUser.nickname + "_" + data.length + ".png";
+				ul.title = " ";
+				ul.description = ul.fileName;
+				ul.filePath = "/home/thcchat/www/vaporchat/uploads/snapshots/";
+				//ul.filePath = "c:\\devel\\uploads\\snapshots\\";
+				uploadService.addUpload(ul, imageSaved);
+			}
+			
+			private function imageSaved(event:TideResultEvent):void
+			{
+				var msg:AsyncMessage = new AsyncMessage();
+				msg.headers.type = "ROOM";
+				msg.headers.roomId = 1;
+				msg.headers.nickname = chatUser.nickname;
+				msg.headers.imageUrl = (event.result as ChatUpload).url;
+				msg.headers.message = (event.result as ChatUpload).title + " - " + (event.result as ChatUpload).description;
+				msg.body = chatUser;
+				producer.send(msg);
+			}
+			
+			private function donate():void {
+				
+				var url:String = "https://www.paypal.com/cgi-bin/webscr";
+				var request:URLRequest = new URLRequest(url);
+				var variables:URLVariables = new URLVariables();
+				
+				variables.cmd = "_s-xclick";
+				variables.hosted_button_id = "X9WVDFJRJ3K2L";
+				request.data = variables;
+				request.method = URLRequestMethod.POST;
+				navigateToURL(request, "_blank");
+			}
+			
+			private function loadCamSpots():void
+			{
+				if(chatUser.hasPermission("viewmedia"))
+				{
+					for(var i:int=0; i<currentRoom.camSpots.length; i++)
+					{
+						var spot:CamSpot = currentRoom.camSpots.getItemAt(i) as CamSpot;
+						chatService.loadCamSpot(1, spot.spotNumber, camSpotLoaded);
+					}
+				}
+			}
+			
+			private function camSpotClick(event:CamSpotEvent):void
+			{
+				if(webcam.camSpot == null)
+				{
+					var op:CamSpotOptionPopup;
+					if(event.spotNumber == 333)
+					{
+						if(chatUser.hasPermission("host"))
+						{
+							//open option popup
+							op = new CamSpotOptionPopup();
+							op.spotNumber = event.spotNumber;
+							op.addEventListener("camSpotOptions", camSpotOptions);
+							PopUpManager.addPopUp(op, this);
+							PopUpManager.centerPopUp(op);
+							//chatService.getCamSpot(1, chatUser.id, event.spotNumber, gotCamSpot);
+							//hostBanner.btnChangeTopic.visible = true;
+						}
+						else
+						{
+							Alert.show("Only Show Hosts and DJs can use this CamSpot!", "Not A Host!");
+						}
+					}
+					else
+					{
+						if(chatUser.hasPermission("publishmedia"))
+						{
+							chatService.getCamSpot(1, chatUser.id, event.spotNumber, "webcam", chatUser.streamId, gotCamSpot);
+						}
+						else
+						{
+							Alert.show("You are not allowed to stream video!", "Not Allowed!");
+						}
+					}
+				}
+				else
+				{
+					Alert.show("One CamSpot Please! You can move your CamSpot by clicking 'Stop My Webcam'.", "Webcam Active!");
+				}
+				/* if(webcam.camSpot == null && chatUser.hasPermission("host") && event.spotNumber == 333)
+				{
+					chatService.getCamSpot(1, chatUser.id, event.spotNumber, gotCamSpot);
+				}
+				else if(webcam.camSpot == null && event.spotNumber != 333)
+				{
+					chatService.getCamSpot(1, chatUser.id, event.spotNumber, gotCamSpot);
+				}
+				else
+				{
+					Alert.show("One Cam Spot Please! You can move your Cam Spot by clicking 'Stop My Webcam'.");
+				} */
+				
+			}
+			
+			private function camSpotOptions(event:CamSpotEvent):void
+			{
+				//Alert.show(event.spotNumber as String);
+				if(event.streamType == "webcam")
+				{
+					if(webcam.camSpot != null)
+					{
+						chatService.leaveCamSpot(webcam.camSpot.id);
+					}
+					
+					chatService.getCamSpot(1, chatUser.id, event.spotNumber, "webcam", chatUser.streamId, gotCamSpot);
+				}
+				else if(event.streamType == "red5")
+				{
+					chatService.getCamSpot(1, chatUser.id, event.spotNumber, "red5", event.source, gotCamSpot);
+				}
+				else if(event.streamType == "youtube")
+				{
+					//Alert.show("Not Implemented,  use '/yt youtubeURL'", "Not Implemented");
+				}
+			}
+			
+			private function gotCamSpot(event:TideResultEvent):void
+			{
+				var cs:CamSpot = event.result as CamSpot;
+				if(cs.type == "webcam")
+				{
+					if(webcam.camSpot == null)
+					{
+						webcam.camSpot = cs;
+						webcam.publish();
+					}
+					else
+					{
+						webcam.camSpot = cs;
+					}
+				}
+				//Alert.show(cs.user.nickname + " Got Spot " + cs.spotNumber);
+			}
+			
+			private function camSpotLoaded(event:TideResultEvent):void
+			{
+				var cs:CamSpot = event.result as CamSpot;
+				if(cs != null)
+				{
+					var ecs:EmbeddedCamSpot;
+					
+					//Host Spot
+					if(cs.spotNumber == 333)
+					{
+						hostSpot.spot = cs;
+						hostSpot.start();
+						if(cs.user.id == chatUser.id)
+						{
+							hostSpot.selfMute();
+						}
+					}
+					else if(cs.spotNumber == 1)
+					{
+						CamSpot1.spot = cs;
+						CamSpot1.start();
+					}
+					else if(cs.spotNumber == 2)
+					{
+						CamSpot2.spot = cs;
+						CamSpot2.start();
+					}
+					else if(cs.spotNumber == 3)
+					{
+						CamSpot3.spot = cs;
+						CamSpot3.start();
+					}
+					else if(cs.spotNumber == 4)
+					{
+						CamSpot4.spot = cs;
+						CamSpot4.start();
+					}
+					else if(cs.spotNumber == 5)
+					{
+						CamSpot5.spot = cs;
+						CamSpot5.start();
+					}
+					else if(cs.spotNumber == 6)
+					{
+						CamSpot6.spot = cs;
+						CamSpot6.start();
+					}
+					else if(cs.spotNumber == 7)
+					{
+						CamSpot7.spot = cs;
+						CamSpot7.start();
+					}
+					else if(cs.spotNumber == 8)
+					{
+						CamSpot8.spot = cs;
+						CamSpot8.start();
+					}
+					else if(cs.spotNumber == 9)
+					{
+						CamSpot9.spot = cs;
+						CamSpot9.start();
+					}
+					else if(cs.spotNumber == 10)
+					{
+						CamSpot10.spot = cs;
+						CamSpot10.start();
+					}
+				}
+			}
+			
+			private function resetCamSpot(spotNumber:int):void
+			{
+				var ecs:EmbeddedCamSpot;
+				
+				if(spotNumber == 333)
+				{
+					hostSpot.reset();
+				}
+				else if(spotNumber == 1)
+				{
+					CamSpot1.reset();
+				}
+				else if(spotNumber == 2)
+				{
+					CamSpot2.reset();
+				}
+				else if(spotNumber == 3)
+				{
+					CamSpot3.reset();
+				}
+				else if(spotNumber == 4)
+				{
+					CamSpot4.reset();
+				}
+				else if(spotNumber == 5)
+				{
+					CamSpot5.reset();
+				}
+				else if(spotNumber == 6)
+				{
+					CamSpot6.reset();
+				}
+				else if(spotNumber == 7)
+				{
+					CamSpot7.reset();
+				}
+				else if(spotNumber == 8)
+				{
+					CamSpot8.reset();
+				}
+				else if(spotNumber == 9)
+				{
+					CamSpot9.reset();
+				}
+				else if(spotNumber == 10)
+				{
+					CamSpot10.reset();
+				}
+			}
+			
+			protected function KickClick(event:MouseEvent):void
+			{
+				if(hostSpot.spot != null)
+				{
+					chatService.leaveCamSpot(hostSpot.spot.id);
+				}
+			}
+			
+			private function changeTopic(event:CamSpotEvent):void
+			{
+				currentRoom.topic = event.message;
+				chatService.updateEntity(currentRoom);
+				sendCommandMessage(0, "RELOAD");
+			}
+			
+		]]>
+	</fx:Script>
+	
+<s:BorderContainer id="bcBG" width="100%" height="100%" backgroundColor="#000000"
+				   contentBackgroundColor="#000000"
+				   chromeColor.main="#39628C">
+	
+<!--backgroundImage="@Embed(source='assets/backgrounds/bg8.jpg')"-->
+
+	<s:VGroup id="grpMain" includeIn="main" width="100%" height="100%" chromeColor="#2D7D38"
+			  contentBackgroundAlpha="1.0" gap="2" paddingBottom="2" paddingLeft="2"
+			  paddingRight="2" paddingTop="2">
+
+		<s:VGroup id="grpSnap" width="100%" height="100%" contentBackgroundAlpha="1.0"
+				  contentBackgroundColor="#000000" gap="0">
+		
+		<s:HGroup id="grpChat" width="100%" height="100%" contentBackgroundAlpha="1.0" gap="2">
+			
+			<s:VGroup id="grpChatText" width="100%" height="100%" contentBackgroundAlpha="1.0"
+					  gap="3">
+
+				<s:HGroup id="MainGroup" width="100%" gap="0" verticalAlign="top">
+					<s:VGroup id="LeftCams" gap="17" horizontalAlign="center" paddingTop="0">
+						
+						<components:EmbeddedCamSpot id="CamSpot1" spotNumber="1" isAdmin="{chatUser.type.id == 1}"/>
+						<components:EmbeddedCamSpot id="CamSpot2" spotNumber="2" isAdmin="{chatUser.type.id == 1}"/>
+						<components:EmbeddedCamSpot id="CamSpot3" spotNumber="3" isAdmin="{chatUser.type.id == 1}"/>
+						
+					</s:VGroup>
+					
+					<s:VGroup id="MiddleGroup" width="100%" gap="2" horizontalAlign="center"
+							  paddingTop="0" verticalAlign="middle" paddingBottom="2">
+						
+						<s:HGroup id="TopCams" height="94" gap="17" verticalAlign="middle">
+							<components:EmbeddedCamSpot id="CamSpot4" spotNumber="4" isAdmin="{chatUser.type.id == 1}"/>
+							<components:EmbeddedCamSpot id="CamSpot5" spotNumber="5" isAdmin="{chatUser.type.id == 1}"/>
+							<components:EmbeddedCamSpot id="CamSpot6" spotNumber="6" isAdmin="{chatUser.type.id == 1}"/>
+							<components:EmbeddedCamSpot id="CamSpot7" spotNumber="7" isAdmin="{chatUser.type.id == 1}"/>
+						</s:HGroup>
+						
+						<s:VGroup horizontalAlign="center">
+							<s:Group id="HostGroup">
+								<components:MainCamSpot id="hostSpot"
+														isAdmin="{chatUser.hasPermission('host')}"
+														spotNumber="333"/>
+								<!--<s:Button visible="{chatUser.hasPermission('disconnect')}" right="5" top="45"
+										  label="Kick Host" alpha="0.2" click="KickClick(event)"/>-->
+							</s:Group>
+							
+						</s:VGroup>
+						
+						
+						<!--<s:Button visible="{chatUser.hasPermission('disconnect')}" right="5" top="5"
+								  label="Kick Host" alpha="0.2" click="KickClick(event)"/>-->
+						
+						
+					</s:VGroup>
+					
+					
+					<s:VGroup id="RightCams" gap="17" horizontalAlign="center" paddingTop="0">
+						<components:EmbeddedCamSpot id="CamSpot8" spotNumber="8" isAdmin="{chatUser.type.id == 1}"/>
+						<components:EmbeddedCamSpot id="CamSpot9" spotNumber="9" isAdmin="{chatUser.type.id == 1}"/>
+						<components:EmbeddedCamSpot id="CamSpot10" spotNumber="10" isAdmin="{chatUser.type.id == 1}"/>
+					</s:VGroup>
+				</s:HGroup>
+				
+				<components:HostBanner id="hostBanner" width="100%" height="30"/>
+				
+				<s:BorderContainer width="100%" height="100%" backgroundAlpha="0.2"
+								   backgroundColor="#000000" borderColor="#1C541C"
+								   borderVisible="true" borderWeight="2"
+								   cornerRadius="2"
+								   dropShadowVisible="false">
+					<s:layout>
+						<s:HorizontalLayout gap="0"/>
+					</s:layout>
+					<components:ChatGridGroup id="grdChat" width="100%" height="100%"
+											  chromeColor="#FFFFFF"
+											  maxItems="500">
+					
+					</components:ChatGridGroup>
+					<s:VScrollBar id="chatScrollBar" height="100%" chromeColor="#01FF07"
+								  viewport="{grdChat}"/>
+				</s:BorderContainer>
+				
+				<s:HGroup id="grpChatEntry" width="100%" height="25" contentBackgroundAlpha="1.0"
+						  gap="3" paddingBottom="2" paddingLeft="2" paddingRight="2" paddingTop="2">
+					<s:TextInput id="txtInput" width="100%" height="25" borderColor="#FFFFFF"
+								 borderVisible="false" chromeColor="#FFFFFF" color="#000000"
+								 contentBackgroundAlpha="1.0" contentBackgroundColor="#7EB7F1"
+								 enter="btnSend_clickHandler(new MouseEvent('foo'))" fontSize="14"
+								 keyDown="keyHandler(event)" tabIndex="1"/>
+					
+					<s:Button id="btnSend" width="60" height="25" chromeColor="#01FF07"
+							  click="btnSend_clickHandler(event)" color="#000000" fontSize="14"
+							  fontStyle="italic" fontWeight="bold"
+							  icon="@Embed('assets/icons/arrow.png')" toolTip="Send Chat Message"/>
+					
+					<!--<s:Button id="btnImage" width="35" height="25" chromeColor="#01FF07"
+							  click="browseImage(event)" color="#000000"
+							  icon="@Embed('assets/icons/image-sunset.png')" toolTip="Post Image"/>
+					
+					<s:Button id="btnYouTube" width="35" height="25" label="YT" chromeColor="#01FF07"
+							  click="youTubeInput()" color="#000000" fontSize="12"
+							  fontStyle="italic" fontWeight="bold" toolTip="Post YouTube Video"/>
+					
+					<s:Button id="btnClear" width="55" height="25" label="Clear"
+							  chromeColor="#01FF07" click="btnClear_clickHandler(event)"
+							  color="#000000" fontSize="14" fontStyle="italic" fontWeight="bold"
+							  toolTip="Clear Chat Display"/>-->
+				</s:HGroup>
+				
+			</s:VGroup>
+			
+			<s:VGroup id="grpRightPane" height="100%" gap="3" horizontalAlign="center">
+				<s:BorderContainer width="100%" height="100%" backgroundAlpha="0.4"
+								   backgroundColor="#000000" borderColor="#1C541C" borderWeight="2"
+								   cornerRadius="2">
+					
+					<s:DataGrid id="userList" width="100%" height="100%" borderVisible="false"
+								chromeColor="#01FF07" color="#000000" contentBackgroundAlpha="0.05"
+								contentBackgroundColor="#ffffff" dataProvider="{currentRoom.users}">
+						<s:columns>
+							<s:ArrayList>
+								<s:GridColumn headerText="{'Online Users ('+ currentRoom.users.length +')'}" itemCreationPolicy="immediate"
+											  itemDestructionPolicy="auto" includeIn="main"
+											  resizable="false" itemRendererFunction="userGridRendererFunction">
+								</s:GridColumn>
+							</s:ArrayList>
+						</s:columns>
+					</s:DataGrid>
+					
+				</s:BorderContainer>
+
+				<components:MyWebcam id="webcam" dropShadowVisible="false" user="{chatUser}"
+									 chatService="{chatService}">
+				</components:MyWebcam>
+				
+				<s:HGroup>
+					<s:CheckBox id="chkScrollLock" change="toggleScrollLock()" label="Scroll Lock" color="#FFFFFF"
+								fontWeight="bold" toolTip="Lock the Chat Window Scroll"/>
+
+					<s:CheckBox id="chkAway" label="Set Away" change="toggleAway()" color="#FFFFFF"
+								fontWeight="bold" toolTip="Mark yourself as being away."/>
+				</s:HGroup>
+				
+				<s:Label id="lblClientVersion" color="#C96ADA" fontFamily="Verdana" fontSize="10"
+						 text="{clientVersion}"/>
+				
+<!--				<s:HGroup>
+					<s:Image source="@Embed('assets/donate.gif')" buttonMode="true" useHandCursor="true" click="donate()"
+							 toolTip="Please make a small donation to help keep us running." visible="false"/>
+				</s:HGroup>-->
+				
+			</s:VGroup>
+		</s:HGroup>
+		</s:VGroup>
+	</s:VGroup>
+	
+	<s:Label includeIn="login" x="29" y="24" color="#4972E7" text="Disconnected... OR you failed the Login, reload please."
+			 buttonMode="true" useHandCursor="false" fontSize="16" backgroundColor="#000000"/>
+	
+</s:BorderContainer>
+</s:Application>
